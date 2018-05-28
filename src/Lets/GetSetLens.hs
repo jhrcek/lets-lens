@@ -65,9 +65,7 @@ data Lens a b =
 -- >>> get sndL ("abc", 0 :: Int)
 -- 0
 --
--- prop> let types = (x :: Int, y :: String) in get fstL (x, y) == x
---
--- prop> let types = (x :: Int, y :: String) in get sndL (x, y) == y
+
 get ::
   Lens a b
   -> a
@@ -83,16 +81,13 @@ get (Lens _ g) =
 -- >>> set sndL ("abc", 0 :: Int) 1
 -- ("abc",1)
 --
--- prop> let types = (x :: Int, y :: String) in set fstL (x, y) z == (z, y)
---
--- prop> let types = (x :: Int, y :: String) in set sndL (x, y) z == (x, z)
 set ::
   Lens a b
-  -> a 
+  -> a
   -> b
   -> a
-set (Lens s _) a =
-  s a
+set (Lens s _) =
+  s
 
 -- | The get/set law of lenses. This function should always return @True@.
 getsetLaw ::
@@ -100,9 +95,9 @@ getsetLaw ::
   Lens a b
   -> a
   -> Bool
-getsetLaw l =
-  \a -> set l a (get l a) == a
-  
+getsetLaw l a =
+  set l a (get l a) == a
+
 -- | The set/get law of lenses. This function should always return @True@.
 setgetLaw ::
   Eq b =>
@@ -112,7 +107,7 @@ setgetLaw ::
   -> Bool
 setgetLaw l a b =
   get l (set l a b) == b
-  
+
 -- | The set/set law of lenses. This function should always return @True@.
 setsetLaw ::
   Eq a =>
@@ -134,16 +129,13 @@ setsetLaw l a b1 b2 =
 -- >>> modify sndL (+1) ("abc", 0 :: Int)
 -- ("abc",1)
 --
--- prop> let types = (x :: Int, y :: String) in modify fstL id (x, y) == (x, y)
---
--- prop> let types = (x :: Int, y :: String) in modify sndL id (x, y) == (x, y)
 modify ::
   Lens a b
   -> (b -> b)
   -> a
   -> a
-modify =
-  error "todo: modify"
+modify l f a =
+  set l a (f (get l a))
 
 -- | An alias for @modify@.
 (%~) ::
@@ -164,16 +156,13 @@ infixr 4 %~
 -- >>> sndL .~ 1 $ ("abc", 0 :: Int)
 -- ("abc",1)
 --
--- prop> let types = (x :: Int, y :: String) in set fstL (x, y) z == (fstL .~ z $ (x, y))
---
--- prop> let types = (x :: Int, y :: String) in set sndL (x, y) z == (sndL .~ z $ (x, y))
 (.~) ::
   Lens a b
   -> b
   -> a
   -> a
-(.~) =
-  error "todo: (.~)"
+(.~) l b a =
+  set l a b
 
 infixl 5 .~
 
@@ -193,8 +182,8 @@ fmodify ::
   -> (b -> f b)
   -> a
   -> f a
-fmodify =
-  error "todo: fmodify"
+fmodify l f a =
+    set l a <$> f (get l a)
 
 -- |
 --
@@ -209,8 +198,9 @@ fmodify =
   -> f b
   -> a
   -> f a
-(|=) =
-  error "todo: (|=)"
+(|=) l fb a =
+    fmap (set l a) fb
+
 
 infixl 5 |=
 
@@ -219,30 +209,20 @@ infixl 5 |=
 -- >>> modify fstL (*10) (3, "abc")
 -- (30,"abc")
 --
--- prop> let types = (x :: Int, y :: String) in getsetLaw fstL (x, y)
---
--- prop> let types = (x :: Int, y :: String) in setgetLaw fstL (x, y) z
---
--- prop> let types = (x :: Int, y :: String) in setsetLaw fstL (x, y) z
 fstL ::
   Lens (x, y) x
 fstL =
-  error "todo: fstL"
+  Lens (\(_, y) x -> (x,y)) fst
 
 -- |
 --
 -- >>> modify sndL (++ "def") (13, "abc")
 -- (13,"abcdef")
 --
--- prop> let types = (x :: Int, y :: String) in getsetLaw sndL (x, y)
---
--- prop> let types = (x :: Int, y :: String) in setgetLaw sndL (x, y) z
---
--- prop> let types = (x :: Int, y :: String) in setsetLaw sndL (x, y) z
 sndL ::
   Lens (x, y) y
 sndL =
-  error "todo: sndL"
+  Lens (\(x,_) y -> (x,y)) snd
 
 -- |
 --
@@ -267,8 +247,12 @@ mapL ::
   Ord k =>
   k
   -> Lens (Map k v) (Maybe v)
-mapL =
-  error "todo: mapL"
+mapL k =
+    Lens
+    (\m mv -> case mv of
+        Nothing -> Map.delete k m
+        Just v -> Map.insert k v m)
+    (Map.lookup k)
 
 -- |
 --
@@ -293,8 +277,10 @@ setL ::
   Ord k =>
   k
   -> Lens (Set k) Bool
-setL =
-  error "todo: setL"
+setL k =
+    Lens
+      (\s b -> if b then Set.insert k s else Set.delete k s)
+      (Set.member k )
 
 -- |
 --
@@ -307,8 +293,11 @@ compose ::
   Lens b c
   -> Lens a b
   -> Lens a c
-compose =
-  error "todo: compose"
+compose (Lens s2 g2) (Lens s1 g1) =
+   Lens
+     (\a c -> let b' = s2 (g1 a) c
+              in s1 a b')
+     (g2 . g1)
 
 -- | An alias for @compose@.
 (|.) ::
@@ -330,7 +319,7 @@ infixr 9 |.
 identity ::
   Lens a a
 identity =
-  error "todo: identity"
+  Lens (\_ x -> x) id
 
 -- |
 --
@@ -343,8 +332,11 @@ product ::
   Lens a b
   -> Lens c d
   -> Lens (a, c) (b, d)
-product =
-  error "todo: product"
+product (Lens s1 g1) (Lens s2 g2) =
+   Lens
+    (\(a,c) (b,d) -> (s1 a b, s2 c d))
+    (\(a,c) -> (g1 a, g2 c))
+
 
 -- | An alias for @product@.
 (***) ::
@@ -373,8 +365,12 @@ choice ::
   Lens a x
   -> Lens b x
   -> Lens (Either a b) x
-choice =
-  error "todo: choice"
+choice l1 l2 =
+  Lens
+    (\eab x -> case eab of
+      Left a -> Left $ set l1 a x
+      Right b -> Right $ set l2 b x)
+    (either (get l1) (get l2))
 
 -- | An alias for @choice@.
 (|||) ::
@@ -462,7 +458,7 @@ getSuburb ::
   Person
   -> String
 getSuburb =
-  error "todo: getSuburb"
+  get $ compose suburbL addressL
 
 -- |
 --
@@ -476,7 +472,7 @@ setStreet ::
   -> String
   -> Person
 setStreet =
-  error "todo: setStreet"
+  set (streetL |. addressL)
 
 -- |
 --
@@ -489,7 +485,7 @@ getAgeAndCountry ::
   (Person, Locality)
   -> (Int, String)
 getAgeAndCountry =
-  error "todo: getAgeAndCountry"
+  get $ product ageL countryL
 
 -- |
 --
@@ -501,8 +497,8 @@ getAgeAndCountry =
 setCityAndLocality ::
   (Person, Address) -> (String, Locality) -> (Person, Address)
 setCityAndLocality =
-  error "todo: setCityAndLocality"
-  
+  set (product (cityL |. localityL |. addressL) localityL)
+
 -- |
 --
 -- >>> getSuburbOrCity (Left maryAddress)
@@ -514,7 +510,7 @@ getSuburbOrCity ::
   Either Address Locality
   -> String
 getSuburbOrCity =
-  error "todo: getSuburbOrCity"
+    get $ choice suburbL cityL
 
 -- |
 --
@@ -528,7 +524,7 @@ setStreetOrState ::
   -> String
   -> Either Person Locality
 setStreetOrState =
-  error "todo: setStreetOrState"
+     set $ choice (streetL |. addressL)  stateL
 
 -- |
 --
@@ -541,4 +537,32 @@ modifyCityUppercase ::
   Person
   -> Person
 modifyCityUppercase =
-  error "todo: modifyCityUppercase"
+  modify (cityL |. localityL |. addressL) (map toUpper)
+
+-- prop> let types = (x :: Int, y :: String) in get fstL (x, y) == x
+--
+-- prop> let types = (x :: Int, y :: String) in get sndL (x, y) == y
+--
+-- prop> let types = (x :: Int, y :: String) in set fstL (x, y) z == (z, y)
+--
+-- prop> let types = (x :: Int, y :: String) in set sndL (x, y) z == (x, z)
+--
+-- prop> let types = (x :: Int, y :: String) in modify fstL id (x, y) == (x, y)
+--
+-- prop> let types = (x :: Int, y :: String) in modify sndL id (x, y) == (x, y)
+--
+-- prop> let types = (x :: Int, y :: String) in set fstL (x, y) z == (fstL .~ z $ (x, y))
+--
+-- prop> let types = (x :: Int, y :: String) in set sndL (x, y) z == (sndL .~ z $ (x, y))
+--
+-- prop> let types = (x :: Int, y :: String) in getsetLaw fstL (x, y)
+--
+-- prop> let types = (x :: Int, y :: String) in setgetLaw fstL (x, y) z
+--
+-- prop> let types = (x :: Int, y :: String) in setsetLaw fstL (x, y) z
+--
+-- prop> let types = (x :: Int, y :: String) in getsetLaw sndL (x, y)
+--
+-- prop> let types = (x :: Int, y :: String) in setgetLaw sndL (x, y) z
+--
+-- prop> let types = (x :: Int, y :: String) in setsetLaw sndL (x, y) z
